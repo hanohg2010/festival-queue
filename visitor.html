@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>줄서기 – 부스 대기현황</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+</head>
+<body>
+<div class="wrap">
+  <header id="hdr"></header>
+  <div id="banner"></div>
+  <main id="view"><div class="empty"><p>불러오는 중…</p></div></main>
+</div>
+<nav id="nav" aria-label="화면 이동"></nav>
+<div id="sheet"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="config.js"></script>
+<script src="shared.js"></script>
+<script>
+(function(){
+'use strict';
+const {$, esc, toast, LV, est, derive, orderedBooths, rowHtml, pinHtml, liveInfoHtml, Data, CFG} = Q;
+const CID = Q.clientId();
+const S = {booths:[], tickets:[], d:{}, tab:'board', view:'list', sort:'base', sheet:null, online:true, fatal:null, loaded:{b:false, t:false}, prev:null, sound:true};
+try { S.sound = localStorage.getItem('queue.sound') !== 'off'; } catch(e){}
+
+const isMine = t => t.clientId === CID && !t.walkin;
+const myTickets = () => S.tickets.filter(isMine);
+const myActive = bid => myTickets().find(t => t.boothId === bid && (t.status === 'waiting' || t.status === 'called'));
+const activeCount = () => myTickets().filter(t => (t.status === 'waiting' || t.status === 'called') && S.d[t.boothId]).length;
+
+/* ---------- 화면 ---------- */
+const ICON = {
+  board:'<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
+  mine:'<svg viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 6v12" stroke-dasharray="2 3"/></svg>'
+};
+function boardHtml(){
+  const list = orderedBooths(S.d, S.sort);
+  if (!list.length) return '<div class="empty"><h2>아직 등록된 부스가 없어요</h2><p>운영진이 부스를 등록하면 여기에 나타나요.</p></div>';
+  const open = list.filter(m => m.level !== 'closed' && m.level !== 'paused');
+  const instant = open.filter(m => m.waitMin === 0).length;
+  let h = '<div class="toolbar"><div class="seg" role="group" aria-label="보기 방식">' +
+    '<button data-act="view" data-v="list" aria-pressed="' + (S.view === 'list') + '">목록</button>' +
+    '<button data-act="view" data-v="map" aria-pressed="' + (S.view === 'map') + '">지도</button></div>' +
+    '<div class="seg" role="group" aria-label="정렬"><button data-act="sort" data-v="base" aria-pressed="' + (S.sort === 'base') + '">기본순</button>' +
+    '<button data-act="sort" data-v="wait" aria-pressed="' + (S.sort === 'wait') + '">대기 짧은 순</button></div></div>' +
+    '<p class="summary">운영 중 <b>' + open.length + '곳</b>, 지금 바로 입장할 수 있는 곳 <b>' + instant + '곳</b></p><div style="height:12px"></div>';
+  if (S.view === 'list'){
+    h += '<div class="rows">' + list.map(m => rowHtml(m, myActive(m.b.id))).join('') + '</div>';
+  } else {
+    const placed = list.filter(m => m.b.x != null && m.b.y != null), unplaced = list.length - placed.length;
+    h += '<div class="mapbox">' + placed.map(pinHtml).join('') + '<span class="entrance">정문</span></div>' +
+      '<div class="legend"><span class="l-ok">여유</span><span class="l-busy">보통</span><span class="l-full">혼잡</span><span class="l-off">접수 중지·종료</span></div>' +
+      '<p class="summary" style="margin-top:8px">핀 안의 숫자는 대기 팀 수예요.' + (unplaced ? ' 위치가 아직 없는 부스 ' + unplaced + '곳은 목록에서 볼 수 있어요.' : '') + '</p>';
+  }
+  return h;
+}
+function mineHtml(){
+  const mine = myTickets().filter(t => S.d[t.boothId]);
+  const active = mine.filter(t => t.status === 'waiting' || t.status === 'called').sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const past = mine.filter(t => !(t.status === 'waiting' || t.status === 'called')).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 6);
+  let h = '<div class="toggle"><span>호출 소리와 진동</span><button class="minibtn" data-act="sound" aria-pressed="' + S.sound + '">' + (S.sound ? '켜짐' : '꺼짐') + '</button></div>';
+  if (!active.length && !past.length) return h + '<div class="empty"><h2>줄 서 있는 부스가 없어요</h2><p>대기현황에서 부스를 골라 줄을 서 보세요.</p><button class="btn" data-act="tab" data-v="board">대기현황 보기</button></div>';
+  if (!active.length) h += '<div class="empty" style="padding:24px 0"><h2>지금 줄 서 있는 부스가 없어요</h2></div>';
+  h += '<div class="tickets">' + active.map(t => {
+    const m = S.d[t.boothId], called = t.status === 'called';
+    const ahead = Math.max(0, m.waiting.findIndex(x => x.id === t.id));
+    return '<article class="ticket' + (called ? ' called' : '') + '"><div class="stub"><span class="no">#' + t.no + '</span><span class="size">' + (t.size || 1) + '명</span></div>' +
+      '<div class="body"><h3>' + esc(m.b.name) + '</h3><p class="who">' + esc(t.name) + ' 님' + (m.b.loc ? ', ' + esc(m.b.loc) : '') + '</p>' +
+      (called ? '<p class="go">지금 입장해 주세요</p>' :
+        '<p class="ahead">내 앞에<b>' + ahead + '</b>팀</p><p class="who">' + (ahead === 0 ? '곧 차례가 와요' : '예상 대기 약 ' + est(m, ahead) + '분') + '</p>') +
+      '<button class="btn ghost sm" data-act="cancelAsk" data-id="' + esc(t.id) + '">줄서기 취소</button></div></article>';
+  }).join('') + '</div>';
+  if (past.length){
+    const L = {done:'이용 완료', noshow:'호출 후 미입장', cancelled:'취소함'};
+    h += '<section class="past"><h2>지난 기록</h2><ul>' + past.map(t => '<li><span>' + esc(S.d[t.boothId].b.name) + '</span><span>' + (L[t.status] || '') + '</span></li>').join('') + '</ul></section>';
+  }
+  return h;
+}
+function paintHeader(){
+  const p = Data.mode === 'firebase' ? (S.online ? ['live', '실시간'] : ['', '연결 끊김']) : ['demo', '데모'];
+  $('#hdr').innerHTML = '<div class="hdr-in"><div class="brand"><h1>줄서기</h1><p>' + esc(CFG.siteTitle) + '</p></div><div class="hdr-actions"><span class="pill ' + p[0] + '">' + p[1] + '</span></div></div>';
+}
+function paintBanner(){
+  let h = '';
+  if (S.fatal) h += '<div class="banner err">서버에 연결하지 못했어요. 와이파이를 확인하고 새로고침해 주세요.</div>';
+  else if (Data.mode === 'demo') h += '<div class="banner">데모 화면이에요. 이 브라우저 안에서만 동작하는 연습용 데이터라서 실제 대기현황이 아니에요.</div>';
+  else if (!S.online) h += '<div class="banner err">연결이 끊겼어요. 화면이 최신이 아닐 수 있어요.</div>';
+  myTickets().filter(t => t.status === 'called' && S.d[t.boothId]).forEach(t => {
+    h += '<button class="banner call" data-act="tab" data-v="mine">' + esc(S.d[t.boothId].b.name) + '에서 호출했어요! 지금 입장해 주세요 (#' + t.no + ')</button>';
+  });
+  $('#banner').innerHTML = h;
+}
+function paintNav(){
+  const n = activeCount();
+  $('#nav').innerHTML = '<div class="in">' + [['board', '대기현황'], ['mine', '내 줄서기']].map(i =>
+    '<button data-act="tab" data-v="' + i[0] + '"' + (S.tab === i[0] ? ' aria-current="page"' : '') + '>' + ICON[i[0]] + i[1] +
+    (i[0] === 'mine' && n ? '<span class="badge">' + n + '</span>' : '') + '</button>').join('') + '</div>';
+}
+function render(){
+  S.d = derive(S.booths, S.tickets);
+  paintHeader(); paintBanner(); paintNav();
+  $('#view').innerHTML = (S.loaded.b && S.loaded.t) || S.fatal ? (S.tab === 'mine' ? mineHtml() : boardHtml()) : '<div class="empty"><p>불러오는 중…</p></div>';
+  if (S.loaded.b && S.loaded.t && !S.deepDone){ S.deepDone = true; deepLink(); }
+  const s = S.sheet;
+  if (s && s.type === 'booth'){
+    if (!S.d[s.id]){ closeSheet(); toast('이 부스는 없어졌어요'); }
+    else { const el = $('#live-info'); if (el) el.innerHTML = liveInfoHtml(S.d[s.id]); }
+  }
+}
+
+/* ---------- 시트 ---------- */
+function closeSheet(){ S.sheet = null; $('#sheet').innerHTML = ''; document.body.classList.remove('lock'); }
+function openSheet(s){ S.sheet = s; paintSheet(); document.body.classList.add('lock'); }
+function paintSheet(){
+  const s = S.sheet; if (!s) return;
+  let body = '';
+  if (s.type === 'booth'){
+    const m = S.d[s.id]; if (!m){ closeSheet(); return; }
+    const b = m.b, already = myActive(b.id);
+    let form;
+    if (b.status !== 'open') form = '<p class="note">지금은 줄서기를 받지 않아요.</p>';
+    else if (already) form = '<p class="note">이미 이 부스에 줄 서 있어요 (#' + already.no + ').</p><button class="btn block" data-act="tab" data-v="mine">내 줄서기 보기</button>';
+    else if (activeCount() >= CFG.maxActivePerVisitor) form = '<p class="note">한 번에 ' + CFG.maxActivePerVisitor + '곳까지만 줄 설 수 있어요. 내 줄서기에서 하나를 정리해 주세요.</p>';
+    else form = '<div class="field"><label for="f-name">별명</label><input id="f-name" maxlength="12" autocomplete="off" placeholder="호출할 때 불러 드려요"><span class="hint">실명이나 연락처는 적지 않아도 돼요.</span></div>' +
+      '<div class="field"><label>인원</label><div class="stepper"><button data-act="size" data-d="-1" aria-label="한 명 줄이기">–</button><output id="size-val">' + (s.size || 1) + '</output><button data-act="size" data-d="1" aria-label="한 명 늘리기">+</button></div></div>' +
+      '<button class="btn lg block" data-act="join">줄서기</button>';
+    body = '<div class="sheet-head"><h2>' + esc(b.name) + '</h2><button class="x" data-act="closeSheet" aria-label="닫기">✕</button></div>' +
+      (b.desc ? '<p class="sub">' + esc(b.desc) + '</p>' : '') + (b.loc ? '<p class="loc" style="margin-top:4px">위치 ' + esc(b.loc) + '</p>' : '') +
+      '<div id="live-info">' + liveInfoHtml(m) + '</div>' + form;
+  } else if (s.type === 'confirm'){
+    body = '<div class="sheet-head"><h2>' + esc(s.title) + '</h2><button class="x" data-act="closeSheet" aria-label="닫기">✕</button></div><p class="sub">' + esc(s.text) + '</p>' +
+      '<div class="btnrow" style="margin-top:16px"><button class="btn danger" data-act="confirmYes">' + esc(s.yes) + '</button><button class="btn ghost" data-act="closeSheet">돌아가기</button></div>';
+  }
+  $('#sheet').innerHTML = '<div class="scrim" data-act="closeSheet"></div><div class="sheet" role="dialog" aria-modal="true">' + body + '</div>';
+  const f = $('#f-name'); if (f) setTimeout(() => f.focus(), 60);
+}
+
+/* ---------- 동작 ---------- */
+async function run(fn){
+  try { return {ok:true, v:await fn()}; }
+  catch(e){ console.error(e); toast('저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요'); return {ok:false}; }
+}
+const H = {
+  tab(el){ S.tab = el.dataset.v; closeSheet(); render(); window.scrollTo(0, 0); },
+  view(el){ S.view = el.dataset.v; render(); },
+  sort(el){ S.sort = el.dataset.v; render(); },
+  booth(el){ openSheet({type:'booth', id:el.dataset.id, size:1}); },
+  closeSheet(){ closeSheet(); },
+  size(el){ const s = S.sheet; if (!s) return; s.size = Math.max(1, Math.min(8, (s.size || 1) + (+el.dataset.d))); $('#size-val').textContent = s.size; },
+  sound(){ S.sound = !S.sound; try { localStorage.setItem('queue.sound', S.sound ? 'on' : 'off'); } catch(e){} if (S.sound) Q.beep([880]); render(); },
+  async join(el){
+    const s = S.sheet, m = s && S.d[s.id]; if (!m) return;
+    const name = $('#f-name').value.trim().slice(0, 12);
+    if (!name){ toast('별명을 입력해 주세요'); $('#f-name').focus(); return; }
+    if (m.b.status !== 'open'){ toast('지금은 줄서기를 받지 않아요'); return; }
+    if (myActive(m.b.id)){ toast('이미 이 부스에 줄 서 있어요'); return; }
+    if (activeCount() >= CFG.maxActivePerVisitor){ toast('한 번에 ' + CFG.maxActivePerVisitor + '곳까지만 줄 설 수 있어요'); return; }
+    el.disabled = true;
+    const r = await run(() => Data.addTicket(m.b.id, {name, size:s.size || 1, clientId:CID, walkin:false}));
+    if (!r.ok){ el.disabled = false; return; }
+    closeSheet(); S.tab = 'mine'; toast('#' + r.v.no + ' 줄서기 완료! 호출하면 알려 드릴게요'); render(); window.scrollTo(0, 0);
+  },
+  cancelAsk(el){
+    const id = el.dataset.id;
+    openSheet({type:'confirm', title:'줄서기를 취소할까요?', text:'다시 줄을 서면 맨 뒤로 가요.', yes:'줄서기 취소',
+      onYes: async () => { const r = await run(() => Data.updateTicket(id, {status:'cancelled'})); if (r.ok){ closeSheet(); toast('취소했어요'); } }});
+  },
+  confirmYes(){ if (S.sheet && S.sheet.onYes) S.sheet.onYes(); }
+};
+document.addEventListener('click', e => { const el = e.target.closest('[data-act]'); if (el && H[el.dataset.act]) H[el.dataset.act](el, e); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && S.sheet) closeSheet();
+  if (e.key === 'Enter' && e.target && e.target.id === 'f-name'){ const b = $('[data-act="join"]'); if (b) H.join(b); }
+});
+
+/* ---------- 데이터 ---------- */
+function checkCalled(){
+  const next = {};
+  S.tickets.forEach(t => { next[t.id] = t.status; });
+  if (S.prev){
+    myTickets().forEach(t => {
+      if (t.status === 'called' && S.prev[t.id] === 'waiting'){
+        toast('호출했어요! 지금 입장해 주세요');
+        if (S.sound){ Q.beep([880, 1175, 880, 1175]); try { navigator.vibrate && navigator.vibrate([250, 120, 250, 120, 250]); } catch(e){} }
+        Q.flashTitle('호출됐어요!');
+      }
+    });
+  }
+  S.prev = next;
+}
+async function start(){
+  render();
+  try { await Data.init(); } catch(e){ console.error(e); S.fatal = true; render(); return; }
+  const onErr = e => { console.error(e); S.fatal = true; render(); };
+  Data.onBooths(list => { S.booths = list; S.loaded.b = true; render(); }, onErr);
+  Data.onTickets(list => { S.tickets = list; S.loaded.t = true; checkCalled(); render(); }, onErr);
+  Data.onConnection(on => { S.online = on; render(); });
+}
+function deepLink(){
+  try {
+    const id = new URLSearchParams(location.search).get('booth');
+    if (id && S.d[id]) openSheet({type:'booth', id, size:1});
+  } catch(e){}
+}
+start();
+})();
+</script>
+</body>
+</html>

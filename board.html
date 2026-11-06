@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>실시간 대기현황 – 전광판</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<style>
+/* 전광판은 항상 화면 가득 보여 줘요 */
+#tv{display:block}
+body::before{display:none}
+.tv-status{font-size:clamp(.9rem,1.4vw,1.2rem);font-weight:700;color:var(--muted);display:flex;align-items:center;gap:8px}
+.tv-status i{width:10px;height:10px;border-radius:50%;background:var(--ok-s);display:inline-block}
+.tv-status.off i{background:var(--full-s)}
+</style>
+</head>
+<body>
+<div id="tv" aria-label="전광판"></div>
+<script src="config.js"></script>
+<script src="shared.js"></script>
+<script>
+(function(){
+'use strict';
+const {$, esc, LV, derive, orderedBooths, Data, CFG} = Q;
+const S = {booths:[], tickets:[], online:true, fatal:false, loaded:{b:false, t:false}, qr:''};
+const params = new URLSearchParams(location.search);
+if (params.get('theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+if (params.get('theme') === 'light') document.documentElement.setAttribute('data-theme', 'light');
+const clockText = () => new Date().toLocaleTimeString('ko-KR', {hour:'numeric', minute:'2-digit'});
+
+function cardHtml(m){
+  const lv = LV[m.level];
+  let e;
+  if (m.level === 'closed') e = '<div class="e word">종료</div>';
+  else if (m.level === 'paused') e = '<div class="e word">접수 중지</div>';
+  else if (m.waitMin === 0) e = '<div class="e word">바로 입장</div>';
+  else e = '<div class="e">' + m.waitMin + '<small>분</small></div>';
+  return '<div class="tv-card ' + lv.c + '"><div class="n">' + esc(m.b.name) + '</div>' + e +
+    '<div class="t">대기 ' + m.waiting.length + '팀' + (m.b.loc ? '  ' + esc(m.b.loc) : '') + '</div></div>';
+}
+function render(){
+  const d = derive(S.booths, S.tickets), list = orderedBooths(d, 'base');
+  const tv = $('#tv');
+  tv.className = list.length > 8 ? 'on dense' : 'on';
+  let body;
+  if (S.fatal) body = '<p class="empty">서버에 연결하지 못했어요. 새로고침해 주세요.</p>';
+  else if (!(S.loaded.b && S.loaded.t)) body = '<p class="empty">불러오는 중…</p>';
+  else if (!list.length) body = '<p class="empty">등록된 부스가 없어요</p>';
+  else body = '<div class="tv-grid">' + list.map(m => cardHtml(d[m.b.id])).join('') + '</div>';
+  const demo = Data.mode === 'demo' ? '<span class="pill demo">데모 데이터</span>' : '';
+  tv.innerHTML = '<div class="tv-top"><h2>실시간 대기현황</h2><div class="tv-side">' + demo +
+    '<span class="tv-status' + (S.online ? '' : ' off') + '"><i></i><span id="tv-clock">' + clockText() + ' 기준</span></span>' +
+    (S.qr ? '<div class="tv-qr">' + S.qr + '<span>스캔하고 줄서기</span></div>' : '') + '</div></div>' + body;
+}
+setInterval(() => { const c = $('#tv-clock'); if (c) c.textContent = clockText() + ' 기준'; }, 20000);
+async function start(){
+  render();
+  try { await Data.init(); } catch(e){ console.error(e); S.fatal = true; render(); return; }
+  const onErr = e => { console.error(e); S.fatal = true; render(); };
+  Data.onBooths(l => { S.booths = l; S.loaded.b = true; render(); }, onErr);
+  Data.onTickets(l => { S.tickets = l; S.loaded.t = true; render(); }, onErr);
+  Data.onConnection(on => { S.online = on; render(); });
+  try { S.qr = await Q.qrSvg(Q.pageUrl('visitor.html'), 4); render(); } catch(e){}
+}
+start();
+})();
+</script>
+</body>
+</html>

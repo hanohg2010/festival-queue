@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>부스 운영 – 줄서기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+</head>
+<body>
+<div class="wrap">
+  <header id="hdr"></header>
+  <div id="banner"></div>
+  <main id="view" style="padding-bottom:40px"><div class="empty"><p>불러오는 중…</p></div></main>
+</div>
+<div id="sheet"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="config.js"></script>
+<script src="shared.js"></script>
+<script>
+(function(){
+'use strict';
+const {$, esc, toast, LV, derive, orderedBooths, pinHtml, Data, CFG} = Q;
+const S = {booths:[], tickets:[], d:{}, auth:null, pick:null, sheet:null, online:true, fatal:null, loaded:{b:false, t:false}, prevWaiting:null, busy:false};
+try { S.auth = JSON.parse(sessionStorage.getItem('queue.auth')); } catch(e){}
+const saveAuth = () => { try { if (S.auth) sessionStorage.setItem('queue.auth', JSON.stringify(S.auth)); else sessionStorage.removeItem('queue.auth'); } catch(e){} };
+const isMaster = () => !!S.auth && S.auth.role === 'master';
+const curId = () => isMaster() ? S.pick : (S.auth && S.auth.boothId);
+
+/* ---------- 화면 ---------- */
+function paintHeader(){
+  const p = Data.mode === 'firebase' ? (S.online ? ['live', '실시간'] : ['', '연결 끊김']) : ['demo', '데모'];
+  $('#hdr').innerHTML = '<div class="hdr-in"><div class="brand"><h1>부스 운영</h1><p>' + esc(CFG.siteTitle) + '</p></div><div class="hdr-actions"><span class="pill ' + p[0] + '">' + p[1] + '</span>' +
+    (S.auth ? '<button class="tvbtn" data-act="logout">나가기</button>' : '') + '</div></div>';
+}
+function paintBanner(){
+  let h = '';
+  if (S.fatal) h += '<div class="banner err">서버에 연결하지 못했어요. 와이파이를 확인하고 새로고침해 주세요.</div>';
+  else if (Data.mode === 'demo') h += '<div class="banner">데모 모드예요. 이 브라우저 안에서만 동작해요. 데모 PIN은 부스 ' + Q.DEMO_PIN + ', 총괄 ' + esc(CFG.masterPin) + '이에요.</div>';
+  else if (!S.online) h += '<div class="banner err">연결이 끊겼어요. 지금 누른 동작이 저장되지 않을 수 있어요.</div>';
+  $('#banner').innerHTML = h;
+}
+function loginHtml(){
+  if (!S.booths.length) return '<div class="login"><h2>운영자 로그인</h2><p class="hint">등록된 부스가 아직 없어요. 총괄 모드로 들어가 부스를 추가해 주세요.</p>' + masterBlock() + '</div>';
+  const opts = orderedBooths(S.d, 'base').map(m => '<option value="' + esc(m.b.id) + '">' + esc(m.b.name) + '</option>').join('');
+  return '<div class="login"><h2>운영자 로그인</h2><p class="hint">우리 부스를 고르고 PIN 번호를 입력해 주세요.</p>' +
+    '<div class="field"><label for="l-booth">부스</label><select id="l-booth">' + opts + '</select></div>' +
+    '<div class="field"><label for="l-pin">PIN 번호</label><input id="l-pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12"></div>' +
+    '<button class="btn lg block" data-act="login">로그인</button>' + masterBlock() + '</div>';
+}
+function masterBlock(){
+  return '<div class="sep"></div><div class="field"><label for="m-pin">총괄 PIN (부스 추가·삭제, PIN 설정)</label><input id="m-pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12"></div>' +
+    '<button class="btn ghost block" data-act="master">총괄 모드로 들어가기</button>';
+}
+function panelHtml(){
+  const list = orderedBooths(S.d, 'base');
+  let h = '';
+  if (isMaster()){
+    if (!S.d[S.pick]) S.pick = list.length ? list[0].b.id : null;
+    h += '<div class="who-bar"><b>총괄 모드</b></div><div class="chips">' + list.map(x => '<button data-act="pick" data-id="' + esc(x.b.id) + '" aria-pressed="' + (x.b.id === S.pick) + '">' + esc(x.b.name) + (x.waiting.length ? ' ' + x.waiting.length : '') + '</button>').join('') +
+      '<button data-act="newBooth">+ 부스 추가</button></div>';
+    if (!list.length) return h + '<div class="empty"><h2>아직 부스가 없어요</h2><p>부스를 추가하면 운영 화면이 나타나요.</p><div class="btnrow"><button class="btn" data-act="newBooth">부스 추가</button><button class="btn ghost" data-act="samples">샘플 부스 5개로 시작</button></div></div>';
+  }
+  const m = S.d[curId()];
+  if (!m) return h + '<div class="empty"><h2>이 부스를 찾을 수 없어요</h2><button class="btn" data-act="logout">처음으로</button></div>';
+  const b = m.b, st = b.status || 'open';
+  h += '<section class="panel"><div><h2>' + esc(b.name) + '</h2><p class="sub">한 팀 ' + m.avg + '분, 동시 ' + m.cap + '팀' + (b.loc ? ', ' + esc(b.loc) : '') + '</p></div>' +
+    '<div class="seg" role="group" aria-label="운영 상태">' + [['open', '운영 중'], ['paused', '접수 중지'], ['closed', '종료']].map(p => '<button data-act="setStatus" data-v="' + p[0] + '" aria-pressed="' + (st === p[0]) + '">' + p[1] + '</button>').join('') + '</div>' +
+    '<div class="stats"><div><b>' + m.waiting.length + '</b><span>대기 팀</span></div><div><b>' + m.called.length + '</b><span>호출 중</span></div><div><b>' + m.done + '</b><span>이용 완료</span></div></div>' +
+    '<button class="btn lg block" data-act="callNext"' + (m.waiting.length ? '' : ' disabled') + '>' + (m.waiting.length ? '다음 팀 호출 (#' + m.waiting[0].no + ' ' + esc(m.waiting[0].name) + ')' : '대기 중인 팀이 없어요') + '</button>' +
+    '<div class="btnrow"><button class="btn ghost sm" data-act="walkin">현장 접수</button><button class="btn ghost sm" data-act="editBooth">부스 설정</button><button class="btn ghost sm" data-act="qr">부스 QR</button></div>';
+  if (m.called.length) h += '<div class="qlist"><p class="qh">호출한 팀</p>' + m.called.map(t =>
+    '<div class="qi called"><div class="t"><b>#' + t.no + '</b><span>' + esc(t.name) + ' ' + (t.size || 1) + '명</span></div><div class="acts"><button class="btn sm" data-act="done" data-id="' + esc(t.id) + '">입장 완료</button><button class="btn ghost sm" data-act="noshow" data-id="' + esc(t.id) + '">미입장</button></div></div>').join('') + '</div>';
+  if (m.waiting.length) h += '<div class="qlist"><p class="qh">기다리는 팀</p>' + m.waiting.map(t =>
+    '<div class="qi"><div class="t"><b>#' + t.no + '</b><span>' + esc(t.name) + ' ' + (t.size || 1) + '명</span>' + (t.walkin ? '<span class="tag">현장</span>' : '') + '</div><div class="acts"><button class="btn ghost sm" data-act="call" data-id="' + esc(t.id) + '">호출</button><button class="btn ghost sm" data-act="noshow" data-id="' + esc(t.id) + '">빼기</button></div></div>').join('') + '</div>';
+  return h + '</section>';
+}
+function render(){
+  S.d = derive(S.booths, S.tickets);
+  paintHeader(); paintBanner();
+  const ready = (S.loaded.b && S.loaded.t) || S.fatal;
+  if (!ready){ $('#view').innerHTML = '<div class="empty"><p>불러오는 중…</p></div>'; return; }
+  if (S.auth && !isMaster() && !S.d[S.auth.boothId] && S.booths.length){ S.auth = null; saveAuth(); }
+  if (!S.auth){
+    if (!$('#l-pin') && !$('#m-pin') || S.loginStale){
+      const keep = ['l-booth', 'l-pin', 'm-pin'].map(id => { const el = document.getElementById(id); return el ? el.value : ''; });
+      $('#view').innerHTML = loginHtml(); S.loginStale = false;
+      ['l-booth', 'l-pin', 'm-pin'].forEach((id, i) => { const el = document.getElementById(id); if (el && keep[i]) el.value = keep[i]; });
+    }
+  } else $('#view').innerHTML = panelHtml();
+  if (S.sheet && S.sheet.type === 'edit' && S.sheet.id && !S.d[S.sheet.id]){ closeSheet(); }
+}
+
+/* ---------- 시트 ---------- */
+function closeSheet(){ S.sheet = null; $('#sheet').innerHTML = ''; document.body.classList.remove('lock'); }
+function openSheet(s){ S.sheet = s; paintSheet(); document.body.classList.add('lock'); }
+function paintSheet(){
+  const s = S.sheet; if (!s) return;
+  const head = t => '<div class="sheet-head"><h2>' + t + '</h2><button class="x" data-act="closeSheet" aria-label="닫기">✕</button></div>';
+  let body = '';
+  if (s.type === 'walkin'){
+    body = head('현장 접수 ' + esc(s.name)) + '<div class="field"><label for="f-name">접수할 분 별명</label><input id="f-name" maxlength="12" autocomplete="off"></div>' +
+      '<div class="field"><label>인원</label><div class="stepper"><button data-act="size" data-d="-1" aria-label="한 명 줄이기">–</button><output id="size-val">' + (s.size || 1) + '</output><button data-act="size" data-d="1" aria-label="한 명 늘리기">+</button></div></div>' +
+      '<button class="btn lg block" data-act="join">현장 접수하기</button>';
+  } else if (s.type === 'edit'){
+    const b = s.id && S.d[s.id] ? S.d[s.id].b : {name:'', desc:'', loc:'', avgMin:5, capacity:1};
+    const master = isMaster();
+    body = head(s.id ? '부스 설정' : '부스 추가') +
+      (master ? '<div class="field"><label for="e-name">부스 이름</label><input id="e-name" maxlength="24" value="' + esc(b.name) + '"></div>' +
+        '<div class="field"><label for="e-desc">한 줄 소개</label><input id="e-desc" maxlength="40" value="' + esc(b.desc) + '"></div>' +
+        '<div class="field"><label for="e-loc">위치 설명</label><input id="e-loc" maxlength="20" value="' + esc(b.loc) + '" placeholder="예: 본관 3층 컴퓨터실"></div>' : '') +
+      '<div class="two"><div class="field"><label for="e-avg">한 팀당 이용 시간(분)</label><input id="e-avg" type="number" inputmode="numeric" min="1" max="60" value="' + esc(b.avgMin) + '"></div>' +
+      '<div class="field"><label for="e-cap">동시에 받는 팀</label><input id="e-cap" type="number" inputmode="numeric" min="1" max="20" value="' + esc(b.capacity) + '"></div></div>' +
+      '<p class="hint" style="margin-bottom:10px">예상 대기 시간은 대기 팀 수와 이 두 값으로 계산해요.</p>' +
+      (master ? '<div class="field"><label for="e-pin">' + (s.id ? '새 PIN (바꿀 때만 입력)' : '운영자 PIN') + '</label><input id="e-pin" type="text" inputmode="numeric" maxlength="12" autocomplete="off" placeholder="숫자 4자리 이상"></div>' : '') +
+      '<div class="btnrow"><button class="btn" data-act="saveBooth">저장</button>' +
+      (master && s.id ? '<button class="btn ghost" data-act="placeOpen">지도 위치</button><button class="btn danger" data-act="deleteAsk">삭제</button>' : '') + '</div>';
+  } else if (s.type === 'place'){
+    const m = S.d[s.id]; if (!m){ closeSheet(); return; }
+    body = head('지도 위치 지정') + '<p class="sub" style="margin-bottom:10px">' + esc(m.b.name) + ' 부스가 있는 곳을 탭하세요.</p>' +
+      '<div class="mapbox mini placing" data-act="mapTap">' + Object.keys(S.d).filter(k => k !== s.id && S.d[k].b.x != null).map(k => pinHtml(S.d[k])).join('') +
+      (m.b.x != null ? pinHtml(m) : '') + '<span class="entrance">정문</span></div>';
+  } else if (s.type === 'qr'){
+    body = head('부스 QR') + '<div class="qrbox" id="qrbox"><p class="hint">만드는 중…</p></div><p class="hint" style="text-align:center">부스 앞에 붙여 두면 방문자가 바로 줄을 설 수 있어요.</p>';
+  } else if (s.type === 'confirm'){
+    body = head(esc(s.title)) + '<p class="sub">' + esc(s.text) + '</p><div class="btnrow" style="margin-top:16px"><button class="btn danger" data-act="confirmYes">' + esc(s.yes) + '</button><button class="btn ghost" data-act="closeSheet">돌아가기</button></div>';
+  }
+  $('#sheet').innerHTML = '<div class="scrim" data-act="closeSheet"></div><div class="sheet" role="dialog" aria-modal="true">' + body + '</div>';
+  const f = $('#f-name') || $('#e-name') || $('#e-avg'); if (f && !f.value) setTimeout(() => f.focus(), 60);
+  if (s.type === 'qr'){
+    const url = Q.pageUrl('visitor.html', '?booth=' + encodeURIComponent(s.id));
+    Q.qrSvg(url, 4).then(svg => { const el = $('#qrbox'); if (el) el.innerHTML = svg + '<p class="url">' + esc(url) + '</p>'; })
+      .catch(() => { const el = $('#qrbox'); if (el) el.innerHTML = '<p class="url">QR을 만들지 못했어요. 아래 주소를 직접 QR로 만들어 쓰세요.<br>' + esc(url) + '</p>'; });
+  }
+}
+
+/* ---------- 동작 ---------- */
+async function run(fn){
+  try { return {ok:true, v:await fn()}; }
+  catch(e){ console.error(e); toast('저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요'); return {ok:false}; }
+}
+const needPin = p => /^\d{4,12}$/.test(p);
+const H = {
+  async login(el){
+    const id = $('#l-booth').value, pin = $('#l-pin').value.trim();
+    if (!pin){ toast('PIN 번호를 입력해 주세요'); return; }
+    el.disabled = true;
+    const r = await run(() => Data.getPinHash(id)); el.disabled = false;
+    if (!r.ok) return;
+    if (!r.v){ toast('이 부스는 PIN이 아직 없어요. 총괄에게 문의해 주세요'); return; }
+    if (Q.hashPin(pin) !== r.v){ toast('PIN 번호가 맞지 않아요'); $('#l-pin').value = ''; return; }
+    S.auth = {role:'booth', boothId:id}; saveAuth(); S.loginStale = true; render();
+  },
+  master(){
+    const pin = $('#m-pin').value.trim();
+    if (pin !== String(CFG.masterPin)){ toast('총괄 PIN이 맞지 않아요'); $('#m-pin').value = ''; return; }
+    S.auth = {role:'master'}; saveAuth(); S.loginStale = true; render();
+  },
+  logout(){ S.auth = null; saveAuth(); S.pick = null; closeSheet(); S.loginStale = true; render(); },
+  pick(el){ S.pick = el.dataset.id; render(); },
+  closeSheet(){ closeSheet(); },
+  size(el){ const s = S.sheet; if (!s) return; s.size = Math.max(1, Math.min(8, (s.size || 1) + (+el.dataset.d))); $('#size-val').textContent = s.size; },
+  async setStatus(el){ const id = curId(); if (id) await run(() => Data.saveBooth(id, {status:el.dataset.v})); },
+  async callNext(){
+    const m = S.d[curId()]; if (!m || !m.waiting.length) return;
+    const t = m.waiting[0]; const r = await run(() => Data.updateTicket(t.id, {status:'called', calledAt:Date.now()}));
+    if (r.ok) toast('#' + t.no + ' ' + t.name + ' 호출했어요');
+  },
+  async call(el){ await run(() => Data.updateTicket(el.dataset.id, {status:'called', calledAt:Date.now()})); },
+  async done(el){ await run(() => Data.updateTicket(el.dataset.id, {status:'done', doneAt:Date.now()})); },
+  async noshow(el){ await run(() => Data.updateTicket(el.dataset.id, {status:'noshow', doneAt:Date.now()})); },
+  walkin(){ const m = S.d[curId()]; if (m) openSheet({type:'walkin', id:m.b.id, name:m.b.name, size:1}); },
+  async join(el){
+    const s = S.sheet; if (!s) return;
+    const name = $('#f-name').value.trim().slice(0, 12);
+    if (!name){ toast('별명을 입력해 주세요'); $('#f-name').focus(); return; }
+    el.disabled = true;
+    const r = await run(() => Data.addTicket(s.id, {name, size:s.size || 1, clientId:'staff', walkin:true}));
+    if (!r.ok){ el.disabled = false; return; }
+    closeSheet(); toast('#' + r.v.no + ' 현장 접수했어요');
+  },
+  newBooth(){ openSheet({type:'edit', id:null}); },
+  editBooth(){ openSheet({type:'edit', id:curId()}); },
+  async saveBooth(){
+    const s = S.sheet, master = isMaster();
+    const num = (sel, lo, hi, def) => Math.max(lo, Math.min(hi, parseInt($(sel).value, 10) || def));
+    const data = {avgMin:num('#e-avg', 1, 60, 5), capacity:num('#e-cap', 1, 20, 1)};
+    let pin = '';
+    if (master){
+      const name = $('#e-name').value.trim();
+      if (!name){ toast('부스 이름을 입력해 주세요'); $('#e-name').focus(); return; }
+      Object.assign(data, {name, desc:$('#e-desc').value.trim(), loc:$('#e-loc').value.trim()});
+      pin = $('#e-pin').value.trim();
+      if ((!s.id || pin) && !needPin(pin)){ toast('PIN은 숫자 4자리 이상으로 적어 주세요'); $('#e-pin').focus(); return; }
+    }
+    if (!s.id) Object.assign(data, {status:'open', createdAt:Date.now()});
+    const r = await run(async () => { const id = await Data.saveBooth(s.id, data); if (pin) await Data.setPinHash(id, Q.hashPin(pin)); return id; });
+    if (!r.ok) return;
+    closeSheet(); if (isMaster()) S.pick = r.v;
+    toast(s.id ? '저장했어요' : '부스를 추가했어요. 지도 위치도 지정해 주세요');
+    render();
+    if (!s.id) openSheet({type:'place', id:r.v});
+  },
+  placeOpen(){ const id = S.sheet && S.sheet.id; if (id) openSheet({type:'place', id}); },
+  async mapTap(el, e){
+    const s = S.sheet; if (!s || s.type !== 'place') return;
+    const r = el.getBoundingClientRect();
+    const x = Math.round(Math.max(4, Math.min(96, (e.clientX - r.left) / r.width * 100)) * 10) / 10;
+    const y = Math.round(Math.max(4, Math.min(92, (e.clientY - r.top) / r.height * 100)) * 10) / 10;
+    const res = await run(() => Data.saveBooth(s.id, {x, y}));
+    if (res.ok){ closeSheet(); toast('위치를 저장했어요'); }
+  },
+  qr(){ const id = curId(); if (id) openSheet({type:'qr', id}); },
+  deleteAsk(){
+    const id = S.sheet.id, name = S.d[id] ? S.d[id].b.name : '';
+    openSheet({type:'confirm', title:name + ' 삭제', text:'이 부스와 대기 기록이 모두 지워져요.', yes:'삭제',
+      onYes: async () => {
+        const ids = S.tickets.filter(t => t.boothId === id).map(t => t.id);
+        const r = await run(() => Data.deleteBooth(id, ids));
+        if (r.ok){ closeSheet(); S.pick = null; toast('삭제했어요'); render(); }
+      }});
+  },
+  confirmYes(){ if (S.sheet && S.sheet.onYes) S.sheet.onYes(); },
+  async samples(el){
+    el.disabled = true; const base = Date.now();
+    for (let i = 0; i < Q.SAMPLES.length; i++){
+      const x = Q.SAMPLES[i];
+      const r = await run(async () => { const id = await Data.saveBooth(null, {name:x.name, desc:x.desc, loc:x.loc, avgMin:x.avgMin, capacity:x.capacity, x:x.x, y:x.y, status:'open', createdAt:base + i}); await Data.setPinHash(id, Q.hashPin(Q.DEMO_PIN)); return id; });
+      if (!r.ok){ el.disabled = false; return; }
+    }
+    toast('샘플 부스를 추가했어요 (부스 PIN은 ' + Q.DEMO_PIN + ')');
+  }
+};
+document.addEventListener('click', e => { const el = e.target.closest('[data-act]'); if (el && H[el.dataset.act]) H[el.dataset.act](el, e); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && S.sheet) closeSheet();
+  if (e.key === 'Enter' && e.target){
+    if (e.target.id === 'l-pin') H.login($('[data-act="login"]'));
+    else if (e.target.id === 'm-pin') H.master();
+    else if (e.target.id === 'f-name' && S.sheet && S.sheet.type === 'walkin') H.join($('[data-act="join"]'));
+  }
+});
+
+/* ---------- 데이터 ---------- */
+function noticeNew(){
+  const id = curId(); if (!id) return;
+  const waiting = {};
+  S.tickets.forEach(t => { if (t.boothId === id && t.status === 'waiting') waiting[t.id] = t; });
+  if (S.prevWaiting && S.prevWaiting.id === id){
+    Object.keys(waiting).forEach(k => {
+      if (!S.prevWaiting.map[k] && !waiting[k].walkin){ toast('새 대기 #' + waiting[k].no + ' ' + waiting[k].name); Q.beep([660, 880]); }
+    });
+  }
+  S.prevWaiting = {id, map:waiting};
+}
+async function start(){
+  render();
+  try { await Data.init(); } catch(e){ console.error(e); S.fatal = true; render(); return; }
+  const onErr = e => { console.error(e); S.fatal = true; render(); };
+  Data.onBooths(list => { S.booths = list; S.loaded.b = true; S.loginStale = true; render(); }, onErr);
+  Data.onTickets(list => { S.tickets = list; S.loaded.t = true; render(); noticeNew(); }, onErr);
+  Data.onConnection(on => { S.online = on; paintHeader(); paintBanner(); });
+}
+start();
+})();
+</script>
+</body>
+</html>

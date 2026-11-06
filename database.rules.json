@@ -1,0 +1,21 @@
+{
+  "rules": {
+    "booths": {
+      ".read": true,
+      ".write": true,
+      "$boothId": {
+        ".validate": "newData.hasChildren(['name']) && newData.child('name').isString() && newData.child('name').val().length <= 24"
+      }
+    },
+    "tickets": {
+      ".read": true,
+      ".write": true,
+      ".indexOn": ["boothId"],
+      "$ticketId": {
+        ".validate": "newData.hasChildren(['boothId','name','no','status','createdAt']) && newData.child('name').isString() && newData.child('name').val().length <= 12 && newData.child('size').val() >= 1 && newData.child('size').val() <= 8 && (newData.child('status').val() == 'waiting' || newData.child('status').val() == 'called' || newData.child('status').val() == 'done' || newData.child('status').val() == 'noshow' || newData.child('status').val() == 'cancelled')"
+      }
+    },
+    "counters": { ".read": true, ".write": true },
+    "pins": { ".read": true, ".write": true }
+  }
+}
