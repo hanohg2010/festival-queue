@@ -2,19 +2,23 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>축제 부스 줄서기</title>
+<meta name="theme-color" content="#F4F4FA" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E0E16" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="shared.css">
 </head>
 <body>
-<div class="wrap" style="max-width:460px">
-  <header style="padding:28px 0 8px"><h1 style="font-size:1.8rem;font-weight:900;letter-spacing:-.03em;margin:0">축제 부스 줄서기</h1><p class="hint" style="margin-top:6px">용도에 맞는 화면을 골라 주세요.</p></header>
-  <div class="rows" style="grid-template-columns:1fr;margin-top:12px">
-    <a class="row ok" href="visitor.html" style="text-decoration:none;color:inherit"><span class="tab"></span><span class="main"><span class="name">방문자용</span><span class="sub">부스 대기현황 보기, 줄서기</span></span><span></span></a>
-    <a class="row busy" href="booth.html" style="text-decoration:none;color:inherit"><span class="tab"></span><span class="main"><span class="name">부스 운영자용</span><span class="sub">호출, 현장 접수, 부스 설정 (PIN 필요)</span></span><span></span></a>
-    <a class="row full" href="board.html" style="text-decoration:none;color:inherit"><span class="tab"></span><span class="main"><span class="name">전광판용</span><span class="sub">큰 화면에 전체 대기현황 띄우기</span></span><span></span></a>
+<div class="wrap" style="max-width:480px">
+  <header style="padding:36px 0 6px"><h1 class="lead" style="margin:0">축제 부스 줄서기</h1><p class="lead-sub" style="margin-top:6px">용도에 맞는 화면을 골라 주세요.</p></header>
+  <div class="rows" style="grid-template-columns:1fr;margin-top:20px">
+    <a class="row ok" href="visitor.html"><span class="r-top"><span class="r-name">방문자용</span><span class="chip ok">QR로 접속</span></span><span class="r-meta">부스 대기현황 보기, 줄서기, 호출 알림</span></a>
+    <a class="row busy" href="booth.html"><span class="r-top"><span class="r-name">부스 운영자용</span><span class="chip busy">PIN 필요</span></span><span class="r-meta">호출, 현장 접수, 부스 설정, 부스 QR</span></a>
+    <a class="row off" href="board.html"><span class="r-top"><span class="r-name">전광판용</span><span class="chip off">큰 화면</span></span><span class="r-meta">전체 부스 대기 시간 보기, 줄서기 QR</span></a>
   </div>
-  <p class="hint" style="margin-top:18px">방문자에게는 visitor.html 주소(또는 전광판의 QR)만 알려 주세요. 운영자용 주소는 운영진끼리만 공유하세요.</p>
+  <p class="hint" style="margin-top:20px">방문자에게는 visitor.html 주소(또는 전광판의 QR)만 알려 주세요. 운영자용 주소는 운영진끼리만 공유하세요.</p>
 </div>
 </body>
 </html>

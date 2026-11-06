@@ -70,14 +70,14 @@ function etaBig(m){
   return '<span class="big">' + m.waitMin + '<small>분</small></span>';
 }
 function rowHtml(m, mine){
-  const b = m.b, lv = LV[m.level];
+  const b = m.b, lv = LV[m.level], open = m.level !== 'closed' && m.level !== 'paused';
+  const eta = !open ? lv.t : (m.waitMin === 0 ? '바로 입장' : '약 ' + m.waitMin + '<small>분</small>');
+  const cta = mine ? '<span class="cta mine">내 번호 #' + mine.no + '</span>' : open ? '<span class="cta">줄서기</span>' : '<span class="cta off">' + lv.t + '</span>';
   return '<button class="row ' + lv.c + '" data-act="booth" data-id="' + esc(b.id) + '">' +
-    '<span class="tab"></span><span class="main"><span class="name">' + esc(b.name) + '</span>' +
-    (b.desc ? '<span class="sub">' + esc(b.desc) + '</span>' : '') +
-    '<span class="tags"><span class="chip ' + lv.c + '">' + lv.t + '</span>' +
-    (b.loc ? '<span class="loc">' + esc(b.loc) + '</span>' : '') +
-    (mine ? '<span class="chip mine">내 번호 #' + mine.no + '</span>' : '') + '</span></span>' +
-    '<span class="eta">' + etaBig(m) + '<span class="teams">대기 ' + m.waiting.length + '팀</span></span></button>';
+    '<span class="r-top"><span class="r-name">' + esc(b.name) + '</span><span class="chip ' + lv.c + '">' + lv.t + '</span></span>' +
+    ((b.desc || b.loc) ? '<span class="r-meta">' + esc(b.desc || '') + (b.loc ? '<span class="loc">위치 ' + esc(b.loc) + '</span>' : '') + '</span>' : '') +
+    '<span class="r-bottom"><span class="r-stat"><i>대기</i><b>' + m.waiting.length + '<small>팀</small></b></span>' +
+    '<span class="r-stat"><i>예상 대기</i><b class="lv">' + eta + '</b></span>' + cta + '</span></button>';
 }
 function pinHtml(m){
   const b = m.b, lv = LV[m.level];

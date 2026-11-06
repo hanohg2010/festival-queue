@@ -4,9 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>줄서기 – 부스 대기현황</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<meta name="theme-color" content="#F4F4FA" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E0E16" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="shared.css">
 </head>
 <body>
@@ -26,7 +27,7 @@
 'use strict';
 const {$, esc, toast, LV, est, derive, orderedBooths, rowHtml, pinHtml, liveInfoHtml, Data, CFG} = Q;
 const CID = Q.clientId();
-const S = {booths:[], tickets:[], d:{}, tab:'board', view:'list', sort:'base', sheet:null, online:true, fatal:null, loaded:{b:false, t:false}, prev:null, sound:true};
+const S = {booths:[], tickets:[], d:{}, tab:'board', view:'list', sort:'base', filter:'all', sheet:null, online:true, fatal:null, loaded:{b:false, t:false}, prev:null, sound:true};
 try { S.sound = localStorage.getItem('queue.sound') !== 'off'; } catch(e){}
 
 const isMine = t => t.clientId === CID && !t.walkin;
@@ -40,23 +41,31 @@ const ICON = {
   mine:'<svg viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 6v12" stroke-dasharray="2 3"/></svg>'
 };
 function boardHtml(){
-  const list = orderedBooths(S.d, S.sort);
-  if (!list.length) return '<div class="empty"><h2>아직 등록된 부스가 없어요</h2><p>운영진이 부스를 등록하면 여기에 나타나요.</p></div>';
-  const open = list.filter(m => m.level !== 'closed' && m.level !== 'paused');
-  const instant = open.filter(m => m.waitMin === 0).length;
-  let h = '<div class="toolbar"><div class="seg" role="group" aria-label="보기 방식">' +
-    '<button data-act="view" data-v="list" aria-pressed="' + (S.view === 'list') + '">목록</button>' +
-    '<button data-act="view" data-v="map" aria-pressed="' + (S.view === 'map') + '">지도</button></div>' +
-    '<div class="seg" role="group" aria-label="정렬"><button data-act="sort" data-v="base" aria-pressed="' + (S.sort === 'base') + '">기본순</button>' +
-    '<button data-act="sort" data-v="wait" aria-pressed="' + (S.sort === 'wait') + '">대기 짧은 순</button></div></div>' +
-    '<p class="summary">운영 중 <b>' + open.length + '곳</b>, 지금 바로 입장할 수 있는 곳 <b>' + instant + '곳</b></p><div style="height:12px"></div>';
+  const all = orderedBooths(S.d, S.sort);
+  if (!all.length) return '<div class="empty"><h2>아직 등록된 부스가 없어요</h2><p>운영진이 부스를 등록하면 여기에 나타나요.</p></div>';
+  const isOpen = m => m.level !== 'closed' && m.level !== 'paused';
+  const open = all.filter(isOpen), instant = open.filter(m => m.waitMin === 0);
+  const best = open.slice().sort((a, b) => a.waitMin - b.waitMin || a.waiting.length - b.waiting.length)[0];
+  const head = !open.length ? '지금 운영 중인 부스가 없어요'
+    : instant.length ? '지금 바로 입장할 수 있는 부스가 ' + instant.length + '곳 있어요'
+    : '지금은 모든 부스에 줄이 있어요';
+  const sub = !best ? '' : instant.length ? '운영 중인 부스는 모두 ' + open.length + '곳이에요' : '대기가 가장 짧은 곳은 ' + esc(best.b.name) + ' (약 ' + best.waitMin + '분)이에요';
+  const list = S.filter === 'now' ? all.filter(m => isOpen(m) && m.waitMin === 0) : all;
+  let h = '<h2 class="lead">' + head + '</h2>' + (sub ? '<p class="lead-sub">' + sub + '</p>' : '') +
+    '<div class="controls"><div class="filters">' +
+    '<button class="fchip" data-act="filter" data-v="all" aria-pressed="' + (S.filter !== 'now') + '">전체</button>' +
+    '<button class="fchip" data-act="filter" data-v="now" aria-pressed="' + (S.filter === 'now') + '">바로 입장</button>' +
+    '<button class="fchip" data-act="sort" aria-pressed="' + (S.sort === 'wait') + '">대기 짧은 순</button></div>' +
+    '<div class="seg" role="group" aria-label="보기 방식"><button data-act="view" data-v="list" aria-pressed="' + (S.view === 'list') + '">목록</button>' +
+    '<button data-act="view" data-v="map" aria-pressed="' + (S.view === 'map') + '">지도</button></div></div>';
   if (S.view === 'list'){
-    h += '<div class="rows">' + list.map(m => rowHtml(m, myActive(m.b.id))).join('') + '</div>';
+    h += list.length ? '<div class="rows">' + list.map(m => rowHtml(m, myActive(m.b.id))).join('') + '</div>'
+      : '<div class="empty"><h2>지금 바로 입장할 수 있는 부스가 없어요</h2><p>전체 보기에서 대기가 짧은 부스를 골라 보세요.</p></div>';
   } else {
-    const placed = list.filter(m => m.b.x != null && m.b.y != null), unplaced = list.length - placed.length;
+    const placed = all.filter(m => m.b.x != null && m.b.y != null), unplaced = all.length - placed.length;
     h += '<div class="mapbox">' + placed.map(pinHtml).join('') + '<span class="entrance">정문</span></div>' +
-      '<div class="legend"><span class="l-ok">여유</span><span class="l-busy">보통</span><span class="l-full">혼잡</span><span class="l-off">접수 중지·종료</span></div>' +
-      '<p class="summary" style="margin-top:8px">핀 안의 숫자는 대기 팀 수예요.' + (unplaced ? ' 위치가 아직 없는 부스 ' + unplaced + '곳은 목록에서 볼 수 있어요.' : '') + '</p>';
+      '<div class="legend"><span class="l-ok">여유</span><span class="l-busy">보통</span><span class="l-full">혼잡</span><span class="l-off">접수 중지, 종료</span></div>' +
+      '<p class="summary" style="margin-top:10px">핀 안의 숫자는 대기 팀 수예요.' + (unplaced ? ' 위치가 아직 없는 부스 ' + unplaced + '곳은 목록에서 볼 수 있어요.' : '') + '</p>';
   }
   return h;
 }
@@ -70,11 +79,12 @@ function mineHtml(){
   h += '<div class="tickets">' + active.map(t => {
     const m = S.d[t.boothId], called = t.status === 'called';
     const ahead = Math.max(0, m.waiting.findIndex(x => x.id === t.id));
-    return '<article class="ticket' + (called ? ' called' : '') + '"><div class="stub"><span class="no">#' + t.no + '</span><span class="size">' + (t.size || 1) + '명</span></div>' +
-      '<div class="body"><h3>' + esc(m.b.name) + '</h3><p class="who">' + esc(t.name) + ' 님' + (m.b.loc ? ', ' + esc(m.b.loc) : '') + '</p>' +
-      (called ? '<p class="go">지금 입장해 주세요</p>' :
-        '<p class="ahead">내 앞에<b>' + ahead + '</b>팀</p><p class="who">' + (ahead === 0 ? '곧 차례가 와요' : '예상 대기 약 ' + est(m, ahead) + '분') + '</p>') +
-      '<button class="btn ghost sm" data-act="cancelAsk" data-id="' + esc(t.id) + '">줄서기 취소</button></div></article>';
+    const state = called
+      ? '<span class="t-go">지금 입장해 주세요</span><span class="t-sub">호출됐어요. 부스로 가 주세요</span>'
+      : '<span class="t-k">내 앞에</span><span class="t-big">' + ahead + '팀</span><span class="t-sub">' + (ahead === 0 ? '곧 차례가 와요' : '예상 대기 약 ' + est(m, ahead) + '분') + '</span>';
+    return '<article class="ticket' + (called ? ' called' : '') + '"><div class="t-top"><span class="t-booth">' + esc(m.b.name) + '</span><span class="t-who">' + esc(t.name) + ' 님 ' + (t.size || 1) + '명</span></div>' +
+      '<div class="t-main"><div class="t-no"><i>내 번호</i><b>#' + t.no + '</b></div><div class="t-state">' + state + '</div></div>' +
+      '<div class="t-foot"><span class="loc">' + (m.b.loc ? '위치 ' + esc(m.b.loc) : '') + '</span><button class="textbtn" data-act="cancelAsk" data-id="' + esc(t.id) + '">줄서기 취소</button></div></article>';
   }).join('') + '</div>';
   if (past.length){
     const L = {done:'이용 완료', noshow:'호출 후 미입장', cancelled:'취소함'};
@@ -149,7 +159,8 @@ async function run(fn){
 const H = {
   tab(el){ S.tab = el.dataset.v; closeSheet(); render(); window.scrollTo(0, 0); },
   view(el){ S.view = el.dataset.v; render(); },
-  sort(el){ S.sort = el.dataset.v; render(); },
+  sort(){ S.sort = S.sort === 'wait' ? 'base' : 'wait'; render(); },
+  filter(el){ S.filter = el.dataset.v; render(); },
   booth(el){ openSheet({type:'booth', id:el.dataset.id, size:1}); },
   closeSheet(){ closeSheet(); },
   size(el){ const s = S.sheet; if (!s) return; s.size = Math.max(1, Math.min(8, (s.size || 1) + (+el.dataset.d))); $('#size-val').textContent = s.size; },

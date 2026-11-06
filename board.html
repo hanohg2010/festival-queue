@@ -4,18 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>실시간 대기현황 – 전광판</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<meta name="theme-color" content="#F4F4FA" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E0E16" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="shared.css">
-<style>
-/* 전광판은 항상 화면 가득 보여 줘요 */
-#tv{display:block}
-body::before{display:none}
-.tv-status{font-size:clamp(.9rem,1.4vw,1.2rem);font-weight:700;color:var(--muted);display:flex;align-items:center;gap:8px}
-.tv-status i{width:10px;height:10px;border-radius:50%;background:var(--ok-s);display:inline-block}
-.tv-status.off i{background:var(--full-s)}
-</style>
+<style>#tv{display:block}body::before{display:none}</style>
 </head>
 <body>
 <div id="tv" aria-label="전광판"></div>
@@ -38,8 +32,8 @@ function cardHtml(m){
   else if (m.level === 'paused') e = '<div class="e word">접수 중지</div>';
   else if (m.waitMin === 0) e = '<div class="e word">바로 입장</div>';
   else e = '<div class="e">' + m.waitMin + '<small>분</small></div>';
-  return '<div class="tv-card ' + lv.c + '"><div class="n">' + esc(m.b.name) + '</div>' + e +
-    '<div class="t">대기 ' + m.waiting.length + '팀' + (m.b.loc ? '  ' + esc(m.b.loc) : '') + '</div></div>';
+  return '<div class="tv-card ' + lv.c + '"><div class="tv-head"><div class="n">' + esc(m.b.name) + '</div><span class="chip ' + lv.c + '">' + lv.t + '</span></div>' + e +
+    '<div class="t">대기 ' + m.waiting.length + '팀' + (m.b.loc ? ',  ' + esc(m.b.loc) : '') + '</div></div>';
 }
 function render(){
   const d = derive(S.booths, S.tickets), list = orderedBooths(d, 'base');
